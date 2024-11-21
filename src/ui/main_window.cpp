@@ -12,6 +12,9 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QMessageBox>
+#include <QGroupBox>
+#include <QSlider>
+#include <QFormLayout>
 
 namespace imu_viz {
 
@@ -97,13 +100,30 @@ namespace imu_viz {
         auto controlWidget = new QWidget(controlDock);
         auto layout = new QVBoxLayout(controlWidget);
 
-        // Control widgets
-        auto calibrateButton = new QPushButton("Calibrate", controlWidget);
-        layout->addWidget(calibrateButton);
+        // Camera controls group
+        auto cameraGroup = new QGroupBox("Camera", controlWidget);
+        auto cameraLayout = new QVBoxLayout(cameraGroup);
 
+        // Reset camera button
+        auto resetCameraButton = new QPushButton("Reset Camera", cameraGroup);
+        connect(resetCameraButton, &QPushButton::clicked, glWidget, &GLWidget::resetCamera);
+        cameraLayout->addWidget(resetCameraButton);
+
+        // Camera speed controls
+        auto rotationSpeedSlider = new QSlider(Qt::Horizontal, cameraGroup);
+        rotationSpeedSlider->setRange(1, 100);
+        rotationSpeedSlider->setValue(50);
+        connect(rotationSpeedSlider, &QSlider::valueChanged,
+                [this](int value) { glWidget->setRotationSpeed(value / 100.0f); });
+
+        auto speedLayout = new QFormLayout;
+        speedLayout->addRow("Rotation Speed:", rotationSpeedSlider);
+        cameraLayout->addLayout(speedLayout);
+
+        layout->addWidget(cameraGroup);
         layout->addStretch();
-        controlDock->setWidget(controlWidget);
 
+        controlDock->setWidget(controlWidget);
         addDockWidget(Qt::RightDockWidgetArea, controlDock);
     }
 
