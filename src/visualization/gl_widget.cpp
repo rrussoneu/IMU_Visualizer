@@ -1,13 +1,8 @@
-//
-// Created by Raphael Russo on 11/20/24.
-//
-
 #include "gl_widget.h"
 #include <QOpenGLBuffer>
 #include <QOpenGLVertexArrayObject>
 #include <QMouseEvent>
 #include <QWheelEvent>
-
 
 namespace imu_viz {
 
@@ -179,12 +174,11 @@ namespace imu_viz {
             isPanning = false;
         }
 
-        // Restore cursor
+        // Reset cursor
         setCursor(Qt::ArrowCursor);
     }
 
-
-
+    // Originally to be like threejs arcball camera, but not using for now
     QVector3D GLWidget::getArcballVector(const QPoint& screenPos) {
         // Convert screen coordinates to normalized device coordinates (-1 to 1)
         float x = (2.0f * screenPos.x()) / width() - 1.0f;
@@ -214,9 +208,9 @@ namespace imu_viz {
         glDepthFunc(GL_LESS);  // Add explicit depth function
 
         // Face culling setup
+        glFrontFace(GL_CCW);  // CC winding
+        glCullFace(GL_BACK);   // Cull back faces
         glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-        glFrontFace(GL_CCW);
 
         // Enable multisampling if available
         glEnable(GL_MULTISAMPLE);
@@ -244,49 +238,55 @@ namespace imu_viz {
     void GLWidget::paintGL() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        if (!program->isLinked()) {
-            qDebug() << "Shader program not linked!";
-            return;
-        }
-
-        program->bind();
-
-        // Static rotation for testing
-        static float angle = 0.0f;
-        angle += 0.5f;
-        QMatrix4x4 modelRotation;
-        modelRotation.rotate(angle, QVector3D(0.0f, 1.0f, 0.0f));
-
-        // Debug info
-        static int frameCount = 0;
-        if (frameCount++ % 60 == 0) {  // Print every 60 frames
-            qDebug() << "Current rotation angle:" << angle;
-            qDebug() << "Camera position:" << cameraPosition;
+        static bool firstFrame = true;
+        if (firstFrame) {
+            qDebug() << "OpenGL State:";
             qDebug() << "Depth test enabled:" << glIsEnabled(GL_DEPTH_TEST);
             qDebug() << "Face culling enabled:" << glIsEnabled(GL_CULL_FACE);
+            qDebug() << "Main program linked:" << program->isLinked();
+            qDebug() << "Simple program linked:" << simpleProgram->isLinked();
+            qDebug() << "VAO created:" << vao.isCreated();
+            qDebug() << "Axes VAO created:" << axesVAO.isCreated();
+            qDebug() << "Grid VAO created:" << gridVAO.isCreated();
+            firstFrame = false;
         }
-
-        // Set matrices
-        program->setUniformValue("projection", projection);
-        program->setUniformValue("view", view);
-        program->setUniformValue("model", modelRotation);
 
         // Draw cube
-        vao.bind();
-        glDrawArrays(GL_TRIANGLES, 0, 36);
-        vao.release();
+        if (program->isLinked()) {
+            program->bind();
+
+            static float angle = 0.0f;
+            angle += 0.5f;
+            QMatrix4x4 modelRotation;
+            modelRotation.rotate(angle, QVector3D(0.0f, 1.0f, 0.0f));
+            QMatrix3x3 normalMatrix = modelRotation.normalMatrix();
+
+            program->setUniformValue("projection", projection);
+            program->setUniformValue("view", view);
+            program->setUniformValue("model", modelRotation);
+            program->setUniformValue("normalMatrix", normalMatrix);
+            program->setUniformValue("viewPos", cameraPosition);
+            program->setUniformValue("lightPos", QVector3D(5.0f, 0.0f, 5.0f));
+
+            vao.bind();
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+            vao.release();
+
+            program->release();
+        } else {
+            qDebug() << "Main program not linked!";
+        }
 
         // Draw axes and grid
-        if (showAxes) {
-            drawAxes();
-        }
-        if (showGrid) {
-            drawGrid();
+        if (showAxes) drawAxes();
+        if (showGrid) drawGrid();
+
+        // Check for OpenGL errors
+        GLenum err;
+        while ((err = glGetError()) != GL_NO_ERROR) {
+            qDebug() << "OpenGL error:" << err;
         }
 
-        program->release();
-
-        // Continue animation
         update();
     }
 
@@ -324,9 +324,8 @@ namespace imu_viz {
         debugVBO.destroy();
     }
 
-
     void GLWidget::updateOrientation(const Quaterniond& orientation) {
-        // Convert Eigen quaternion to QMatrix4x4
+        // Convert Eigen quaternion to QMatrix
         Eigen::Matrix3d rotMat = orientation.toRotationMatrix();
         QMatrix4x4 rotationMatrix;
         for (int i = 0; i < 3; ++i) {
@@ -341,56 +340,195 @@ namespace imu_viz {
 
     void GLWidget::setShowAxes(bool show) {
         showAxes = show;
-        update(); // Request a redraw
+        update(); // Redraw
     }
 
     void GLWidget::setShowGrid(bool show) {
         showGrid = show;
-        update(); // Request a redraw
+        update(); // Redraw
     }
 
     void GLWidget::setupShaders() {
-        const char* vertexShaderSource = R"(
+        // Desktop for mac testing vertex shader
+        const char* vertexShaderDesktop = R"(
     #version 330 core
     layout(location = 0) in vec3 position;
     layout(location = 1) in vec3 color;
+    layout(location = 2) in vec3 normal;
 
     uniform mat4 projection;
     uniform mat4 view;
     uniform mat4 model;
+    uniform mat3 normalMatrix;
 
-    out vec3 vertexColor;
     out vec3 fragPos;
+    out vec3 vertexColor;
+    out vec3 fragNormal;
 
     void main() {
         vertexColor = color;
         fragPos = vec3(model * vec4(position, 1.0));
+
+        // Transform normal to world space maintaining correct orientation
+        fragNormal = normalize(normalMatrix * normal);
+
         gl_Position = projection * view * model * vec4(position, 1.0);
     }
 )";
 
-        const char* fragmentShaderSource = R"(
+        const char* fragmentShaderDesktop = R"(
     #version 330 core
-    in vec3 vertexColor;
     in vec3 fragPos;
+    in vec3 vertexColor;
+    in vec3 fragNormal;
+
     out vec4 fragColor;
 
+    uniform vec3 lightPos;    // Main light
+    uniform vec3 viewPos;
+
+    // Material properties
+    const float ambientStrength = 0.15;
+    const float diffuseStrength = 0.7;
+    const float specularStrength = 0.8;
+    const float shininess = 64.0;
+
+    // Secondary light sources for better illumination
+    const vec3 fillLightPos = vec3(-5.0, 3.0, -5.0);
+    const vec3 fillLightColor = vec3(0.2, 0.2, 0.3);
+    const float fillLightIntensity = 0.3;
+
+    const vec3 rimLightDir = vec3(0.0, 0.0, -1.0);
+    const vec3 rimLightColor = vec3(0.1, 0.1, 0.15);
+    const float rimLightIntensity = 0.2;
+
+    vec3 calculateLight(vec3 lightPosition, vec3 lightColor, float intensity) {
+        vec3 normal = normalize(fragNormal);
+        vec3 lightDir = normalize(lightPosition - fragPos);
+        vec3 viewDir = normalize(viewPos - fragPos);
+        vec3 halfwayDir = normalize(lightDir + viewDir);
+
+        // Ambient
+        vec3 ambient = ambientStrength * lightColor;
+
+        // Diffuse
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 diffuse = diffuseStrength * diff * lightColor;
+
+        // Specular (Blinn-Phong)
+        float spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
+        vec3 specular = specularStrength * spec * lightColor;
+
+        // Edge highlighting (rim lighting)
+        float rim = 1.0 - max(dot(viewDir, normal), 0.0);
+        rim = smoothstep(0.6, 1.0, rim);
+
+        return intensity * (ambient + diffuse + specular);
+    }
+
     void main() {
-        vec3 lightPos = vec3(5.0, 5.0, 5.0);
-        vec3 lightDir = normalize(lightPos - fragPos);
-        float diff = max(dot(normalize(vec3(0.0, 1.0, 0.0)), lightDir), 0.0);
-        vec3 diffuse = vertexColor * (0.5 + 0.5 * diff);  // Basic diffuse lighting
-        fragColor = vec4(diffuse, 1.0);
+        // Main light (warm white)
+        vec3 mainLight = calculateLight(lightPos, vec3(1.0, 0.95, 0.8), 1.0);
+
+        // Fill light (cool blue)
+        vec3 fillLight = calculateLight(fillLightPos, fillLightColor, fillLightIntensity);
+
+        // Rim light
+        vec3 normal = normalize(fragNormal);
+        vec3 viewDir = normalize(viewPos - fragPos);
+        float rim = 1.0 - max(dot(viewDir, normal), 0.0);
+        rim = smoothstep(0.6, 1.0, rim);
+        vec3 rimLight = rim * rimLightColor * rimLightIntensity;
+
+        // Combine all lighting
+        vec3 result = (mainLight + fillLight + rimLight) * vertexColor;
+
+        // Tone mapping and gamma correction
+        result = result / (result + vec3(1.0));  // HDR tone mapping
+        result = pow(result, vec3(1.0/2.2));     // Gamma correction
+
+        fragColor = vec4(result, 1.0);
     }
 )";
 
-        // Add error checking
-        if (!program->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource)) {
+        // Raspberry Pi (using OpenGL ES) vertex shader
+        const char* vertexShaderES = R"(
+        #version 100
+        attribute vec3 position;
+        attribute vec3 color;
+        attribute vec3 normal;
+
+        uniform mat4 projection;
+        uniform mat4 view;
+        uniform mat4 model;
+        uniform mat3 normalMatrix;
+
+        varying vec3 fragPos;
+        varying vec3 vertexColor;
+        varying vec3 fragNormal;
+
+        void main() {
+            vertexColor = color;
+            fragPos = vec3(model * vec4(position, 1.0));
+            // Transform normal to world space
+            fragNormal = normalMatrix * normal;
+            gl_Position = projection * view * model * vec4(position, 1.0);
+        }
+    )";
+
+        const char* fragmentShaderES = R"(
+        precision mediump float;
+        varying vec3 fragPos;
+        varying vec3 vertexColor;
+        varying vec3 fragNormal;
+
+        uniform vec3 lightPos;
+        uniform vec3 viewPos;
+
+        void main() {
+            // Ambient
+            float ambientStrength = 0.1;
+            vec3 ambient = ambientStrength * vertexColor;
+
+            // Diffuse
+            vec3 norm = normalize(fragNormal);
+            vec3 lightDir = normalize(lightPos - fragPos);
+            float diff = max(dot(norm, lightDir), 0.0);
+            vec3 diffuse = diff * vertexColor;
+
+            // Specular
+            float specularStrength = 0.5;
+            vec3 viewDir = normalize(viewPos - fragPos);
+            vec3 reflectDir = reflect(-lightDir, norm);
+            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+            vec3 specular = specularStrength * spec * vec3(1.0);
+
+            vec3 result = ambient + diffuse + specular;
+            gl_FragColor = vec4(result, 1.0);
+        }
+    )";
+
+        // Choose shader version based on platform
+        const char* vertexSource;
+        const char* fragmentSource;
+
+#ifdef __APPLE__
+        vertexSource = vertexShaderDesktop;
+        fragmentSource = fragmentShaderDesktop;
+        qDebug() << "Using Desktop OpenGL shaders";
+#else
+        vertexSource = vertexShaderES;
+        fragmentSource = fragmentShaderES;
+        qDebug() << "Using OpenGL ES shaders";
+#endif
+
+        // Compile shaders with error checking
+        if (!program->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexSource)) {
             qDebug() << "Vertex shader compilation failed:" << program->log();
             return;
         }
 
-        if (!program->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource)) {
+        if (!program->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentSource)) {
             qDebug() << "Fragment shader compilation failed:" << program->log();
             return;
         }
@@ -400,107 +538,223 @@ namespace imu_viz {
             return;
         }
 
-        // Verify locations
-        qDebug() << "position attribute location:" << program->attributeLocation("position");
-        qDebug() << "color attribute location:" << program->attributeLocation("color");
+        // Set up lighting uniforms
+        program->bind();
+        program->setUniformValue("lightPos", QVector3D(5.0f, 5.0f, 5.0f));
+        program->setUniformValue("viewPos", cameraPosition);
+        program->setUniformValue("ambientColor", QVector3D(0.1f, 0.1f, 0.1f));
+        program->setUniformValue("specularStrength", 0.5f);
+        program->setUniformValue("shininess", 32.0f);
+        program->release();
+
+
+        simpleProgram = std::make_unique<QOpenGLShaderProgram>();
+
+        // Simple shader for mac
+        const char* simpleVertexShaderDesktop = R"(
+            #version 330 core
+            layout(location = 0) in vec3 position;
+            layout(location = 1) in vec3 color;
+
+            uniform mat4 projection;
+            uniform mat4 view;
+            uniform mat4 model;
+
+            out vec3 vertexColor;
+
+            void main() {
+                vertexColor = color;
+                gl_Position = projection * view * model * vec4(position, 1.0);
+            }
+        )";
+
+        const char* simpleFragmentShaderDesktop = R"(
+            #version 330 core
+            in vec3 vertexColor;
+            out vec4 fragColor;
+
+            void main() {
+                fragColor = vec4(vertexColor, 1.0);
+            }
+        )";
+
+        // Simple shader for Pi
+        const char* simpleVertexShaderES = R"(
+            #version 100
+            attribute vec3 position;
+            attribute vec3 color;
+
+            uniform mat4 projection;
+            uniform mat4 view;
+            uniform mat4 model;
+
+            varying vec3 vertexColor;
+
+            void main() {
+                vertexColor = color;
+                gl_Position = projection * view * model * vec4(position, 1.0);
+            }
+        )";
+
+        const char* simpleFragmentShaderES = R"(
+            precision mediump float;
+            varying vec3 vertexColor;
+
+            void main() {
+                gl_FragColor = vec4(vertexColor, 1.0);
+            }
+        )";
+
+        // Choose shader source based on platform
+        const char* simpleVertexSource;
+        const char* simpleFragmentSource;
+
+#ifdef __APPLE__
+        simpleVertexSource = simpleVertexShaderDesktop;
+        simpleFragmentSource = simpleFragmentShaderDesktop;
+        qDebug() << "Using Desktop OpenGL shaders for simpleProgram";
+#else
+        simpleVertexSource = simpleVertexShaderES;
+        simpleFragmentSource = simpleFragmentShaderES;
+        qDebug() << "Using OpenGL ES shaders for simpleProgram";
+#endif
+
+        if (!simpleProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, simpleVertexSource)) {
+            qDebug() << "Simple vertex shader compilation failed:" << simpleProgram->log();
+            return;
+        }
+
+        if (!simpleProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, simpleFragmentSource)) {
+            qDebug() << "Simple fragment shader compilation failed:" << simpleProgram->log();
+            return;
+        }
+
+        if (!simpleProgram->link()) {
+            qDebug() << "Simple shader program linking failed:" << simpleProgram->log();
+            return;
+        }
+
     }
 
     void GLWidget::setupBuffers() {
+        vao.create();
+        vao.bind();
         static const float vertices[] = {
-                // Front face (red) - CCW winding
-                -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,  // Bottom left
-                0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,  // Bottom right
-                0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,  // Top right
-                0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,  // Top right
-                -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,  // Top left
-                -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,  // Bottom left
+                // Positions, colors, normals
+                // Front face (red)
+                // First triangle
+                -0.5f, -0.5f, +0.5f,  1.0f, 0.0f, 0.0f,   0.0f,  0.0f, +1.0f,  // Bottom-left
+                +0.5f, -0.5f, +0.5f,  1.0f, 0.0f, 0.0f,   0.0f,  0.0f, +1.0f,  // Bottom-right
+                +0.5f, +0.5f, +0.5f,  1.0f, 0.0f, 0.0f,   0.0f,  0.0f, +1.0f,  // Top-right
+                // Second triangle
+                -0.5f, -0.5f, +0.5f,  1.0f, 0.0f, 0.0f,   0.0f,  0.0f, +1.0f,  // Bottom-left
+                +0.5f, +0.5f, +0.5f,  1.0f, 0.0f, 0.0f,   0.0f,  0.0f, +1.0f,  // Top-right
+                -0.5f, +0.5f, +0.5f,  1.0f, 0.0f, 0.0f,   0.0f,  0.0f, +1.0f,  // Top-left
 
-                // Back face (green) - CCW when looking from back
-                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-                0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-                0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-                0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-                -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+                // Back face (green)
+                // First triangle
+                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f, -1.0f,  // Bottom-left
+                +0.5f, +0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f, -1.0f,  // Top-right
+                +0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f, -1.0f,  // Bottom-right
+                // Second triangle
+                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f, -1.0f,  // Bottom-left
+                -0.5f, +0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f, -1.0f,  // Top-left
+                +0.5f, +0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f, -1.0f,  // Top-right
 
-                // Top face (blue)
-                -0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-                -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-                0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-                0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-                0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-                -0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
+                // Left face (blue)
+                // First triangle
+                -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,  -1.0f,  0.0f,  0.0f,  // Back-bottom
+                -0.5f, +0.5f, +0.5f,  0.0f, 0.0f, 1.0f,  -1.0f,  0.0f,  0.0f,  // Front-top
+                -0.5f, +0.5f, -0.5f,  0.0f, 0.0f, 1.0f,  -1.0f,  0.0f,  0.0f,  // Back-top
+                // Second triangle
+                -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,  -1.0f,  0.0f,  0.0f,  // Back-bottom
+                -0.5f, -0.5f, +0.5f,  0.0f, 0.0f, 1.0f,  -1.0f,  0.0f,  0.0f,  // Front-bottom
+                -0.5f, +0.5f, +0.5f,  0.0f, 0.0f, 1.0f,  -1.0f,  0.0f,  0.0f,  // Front-top
 
-                // Bottom face (yellow)
-                -0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-                0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-                0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-                0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-                -0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-                -0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
+                // Right face (yellow)
+                // First triangle
+                +0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,  +1.0f,  0.0f,  0.0f,  // Back-bottom
+                +0.5f, +0.5f, -0.5f,  1.0f, 1.0f, 0.0f,  +1.0f,  0.0f,  0.0f,  // Back-top
+                +0.5f, +0.5f, +0.5f,  1.0f, 1.0f, 0.0f,  +1.0f,  0.0f,  0.0f,  // Front-top
+                // Second triangle
+                +0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,  +1.0f,  0.0f,  0.0f,  // Back-bottom
+                +0.5f, +0.5f, +0.5f,  1.0f, 1.0f, 0.0f,  +1.0f,  0.0f,  0.0f,  // Front-top
+                +0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.0f,  +1.0f,  0.0f,  0.0f,  // Front-bottom
 
-                // Right face (magenta)
-                0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-                0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-                0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-                0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-                0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-                0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
+                // Top face (magenta)
+                // First triangle
+                -0.5f, +0.5f, -0.5f,  1.0f, 0.0f, 1.0f,   0.0f, +1.0f,  0.0f,  // Back-left
+                +0.5f, +0.5f, +0.5f,  1.0f, 0.0f, 1.0f,   0.0f, +1.0f,  0.0f,  // Front-right
+                +0.5f, +0.5f, -0.5f,  1.0f, 0.0f, 1.0f,   0.0f, +1.0f,  0.0f,  // Back-right
+                // Second triangle
+                -0.5f, +0.5f, -0.5f,  1.0f, 0.0f, 1.0f,   0.0f, +1.0f,  0.0f,  // Back-left
+                -0.5f, +0.5f, +0.5f,  1.0f, 0.0f, 1.0f,   0.0f, +1.0f,  0.0f,  // Front-left
+                +0.5f, +0.5f, +0.5f,  1.0f, 0.0f, 1.0f,   0.0f, +1.0f,  0.0f,  // Front-right
 
-                // Left face (cyan)
-                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
-                -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-                -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-                -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-                -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
-                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f
+                // Bottom face (cyan)
+                // First triangle
+                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,   0.0f, -1.0f,  0.0f,  // Back-left
+                +0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,   0.0f, -1.0f,  0.0f,  // Back-right
+                +0.5f, -0.5f, +0.5f,  0.0f, 1.0f, 1.0f,   0.0f, -1.0f,  0.0f,  // Front-right
+                // Second triangle
+                -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,   0.0f, -1.0f,  0.0f,  // Back-left
+                +0.5f, -0.5f, +0.5f,  0.0f, 1.0f, 1.0f,   0.0f, -1.0f,  0.0f,  // Front-right
+                -0.5f, -0.5f, +0.5f,  0.0f, 1.0f, 1.0f,   0.0f, -1.0f,  0.0f,  // Front-left
         };
 
 
-        // Main object VAO/VBO setup
-            vao.create();
-            vao.bind();
+        vbo.create();
+        vbo.bind();
+        vbo.allocate(vertices, sizeof(vertices));
 
-            vbo.create();
-            vbo.bind();
-            vbo.allocate(vertices, sizeof(vertices));
+        program->bind();
 
-            // Set up vertex attributes
-            program->enableAttributeArray(0);
-            program->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
-            program->enableAttributeArray(1);
-            program->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+        // Position attribute
+        program->enableAttributeArray(0);
+        program->setAttributeBuffer(0, GL_FLOAT, 0, 3, 9 * sizeof(float));
+        // Color attribute
+        program->enableAttributeArray(1);
+        program->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 9 * sizeof(float));
+        // Normal attribute
+        program->enableAttributeArray(2);
+        program->setAttributeBuffer(2, GL_FLOAT, 6 * sizeof(float), 3, 9 * sizeof(float));
 
-            vao.release();
+        program->release();
+        vao.release();
+        vbo.release();
 
-        // Set up axes VAO/VBO
+        // Set up axes vertex objects
         axesVAO.create();
+        axesVBO.create();
+
         axesVAO.bind();
+        axesVBO.bind();
 
         static const float axesVertices[] = {
-                // x-axis (red)
+                // x (red)
                 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
                 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-                // y-axis (green)
+                // y (green)
                 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
                 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-                // z-axis (blue)
+                // z (blue)
                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
                 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f
         };
 
-        axesVBO.create();
-        axesVBO.bind();
         axesVBO.allocate(axesVertices, sizeof(axesVertices));
 
-        program->enableAttributeArray(0);
-        program->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
-        program->enableAttributeArray(1);
-        program->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+        simpleProgram->bind();  // Use simple program for axes <---
+        simpleProgram->enableAttributeArray(0);
+        simpleProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
+        simpleProgram->enableAttributeArray(1);
+        simpleProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+        simpleProgram->release();
 
         axesVAO.release();
+        axesVBO.release();
 
-        // Set up grid VAO/VBO
+        // Set up grid vertex objects
         gridVAO.create();
         gridVBO.create();
     }
@@ -508,20 +762,28 @@ namespace imu_viz {
     void GLWidget::drawAxes() {
         if (!axesVAO.isCreated()) return;
 
+        simpleProgram->bind();
+
         QMatrix4x4 axesModel;
         axesModel.scale(2.0f); // Scale axes to make them more visible
 
-        program->setUniformValue("model", axesModel);
+        simpleProgram->setUniformValue("projection", projection);
+        simpleProgram->setUniformValue("view", view);
+        simpleProgram->setUniformValue("model", axesModel);
 
         axesVAO.bind();
         glDrawArrays(GL_LINES, 0, 6);
         axesVAO.release();
+
+        simpleProgram->release();
     }
 
     void GLWidget::drawGrid() {
         if (!gridVAO.isCreated()) return;
 
-        // Create grid points if not already created
+        simpleProgram->bind();
+
+        // Create grid points
         static std::vector<float> gridVertices;
         if (gridVertices.empty()) {
             const float gridSize = 5.0f;
@@ -551,23 +813,30 @@ namespace imu_viz {
                 gridVertices.push_back(x);
                 gridVertices.insert(gridVertices.end(), gridColor, gridColor + 3);
             }
+
+            gridVBO.bind();
+            gridVBO.allocate(gridVertices.data(), gridVertices.size() * sizeof(float));
+            gridVBO.release();
         }
 
         gridVAO.bind();
         gridVBO.bind();
-        gridVBO.allocate(gridVertices.data(), gridVertices.size() * sizeof(float));
 
-        program->enableAttributeArray(0);
-        program->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
-        program->enableAttributeArray(1);
-        program->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+        simpleProgram->enableAttributeArray(0);
+        simpleProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
+        simpleProgram->enableAttributeArray(1);
+        simpleProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
 
         QMatrix4x4 gridModel;
         gridModel.translate(0.0f, -2.0f, 0.0f); // Place grid below the object
-        program->setUniformValue("model", gridModel);
+        simpleProgram->setUniformValue("projection", projection);
+        simpleProgram->setUniformValue("view", view);
+        simpleProgram->setUniformValue("model", gridModel);
 
         glDrawArrays(GL_LINES, 0, gridVertices.size() / 6);
         gridVAO.release();
+
+        simpleProgram->release();
     }
 
 }

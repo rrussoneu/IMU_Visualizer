@@ -79,6 +79,7 @@ namespace imu_viz {
 
         // Shader program
         std::unique_ptr<QOpenGLShaderProgram> program;
+        std::unique_ptr<QOpenGLShaderProgram> simpleProgram;
 
         // Matrices
         QMatrix4x4 projection;
