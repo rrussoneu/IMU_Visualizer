@@ -6,6 +6,6 @@ This project is a real-time 3D visualization system that combines embedded syste
 
 <div style="display: flex; justify-content: center;">
   <a href="https://www.youtube.com/shorts/c-G2TD-YkFc" style="margin-right: 10px;">
-    <img src="https://img.youtube.com/vi/c-G2TD-YkFc.jpg" alt="BLUEBERRY_JOKE" width="200">
+    <img src="https://img.youtube.com/vi/c-G2TD-YkFc.jpg" alt="Demo Video" width="200">
   </a>
 </div>
