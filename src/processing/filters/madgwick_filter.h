@@ -8,6 +8,7 @@
 namespace imu_viz {
     class MadgwickFilter : public IOrientationFilter {
     public:
+        // Useful reference: https://github.com/bjohnsonfl/Madgwick_Filter
         MadgwickFilter(double beta = 0.1)
                 : beta(beta), currentOrientation(Quaterniond::Identity()) {}
 

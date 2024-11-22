@@ -24,7 +24,7 @@ namespace imu_viz {
         Eigen::Vector3d gyroBias{0, 0, 0};
         Eigen::Matrix3d gyroScale{Eigen::Matrix3d::Identity()};
 
-        // Save/load calibration
+        // Save/load calibration, not used currently but could be useful
         bool saveToFile(const std::string& filename) const;
         bool loadFromFile(const std::string& filename);
     };

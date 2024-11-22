@@ -10,7 +10,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find required packages
-find_package(Qt6 COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets SerialPort REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets SerialPort Network REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 # Platform-specific settings
@@ -45,6 +45,7 @@ set(SOURCES
 
 # Resource files
 set(RESOURCES
+        src/transport/tcp_transport.h
 
 
         #resources/resources.qrc
@@ -67,6 +68,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         Qt6::SerialPort
+        Qt6::Network
         Eigen3::Eigen
 )
 

@@ -29,6 +29,7 @@ namespace imu_viz {
         filter = std::move(newFilter);
     }
 
+
     void DataProcessor::processIMUData(const IMUData& data) {
         if (!validateIMUData(data)) {
             emit errorOccurred("Invalid IMU data received");
@@ -36,12 +37,6 @@ namespace imu_viz {
         }
 
         std::lock_guard<std::mutex> lock(dataMutex);
-
-        // Handle calibration if active
-        if (isCalibrating) {
-            updateCalibration(data);
-            return;
-        }
 
         // Calculate time delta
         double deltaTime = 0.0;
@@ -53,45 +48,34 @@ namespace imu_viz {
         }
         lastTimestamp = data.timestamp;
 
-        // Apply calibration
-        Vector3d calibratedAccel = applyCalibration(
-                data.acceleration,
-                calibration.accelBias,
-                calibration.accelScale
-        );
-        Vector3d calibratedGyro = applyCalibration(
-                data.gyroscope,
-                calibration.gyroBias,
-                calibration.gyroScale
-        );
+        try {
+            // Scale down the raw values
+            const double ACCEL_SCALE = 0.1;  // Reduce acceleration sensitivity
+            const double GYRO_SCALE = 0.1;   // Reduce gyroscope sensitivity
 
-        //updateOrientation(calibratedAccel, calibratedGyro, deltaTime);
-        if (filter) {
-            try {
-                filter->update(calibratedAccel, calibratedGyro, deltaTime);
+            // Scale and apply calibration
+            Vector3d scaledAccel = data.acceleration * ACCEL_SCALE;
+            Vector3d scaledGyro = data.gyroscope * GYRO_SCALE;
 
-                // Get the current orientation from the filter
+            if (filter) {
+                // Update orientation using scaled values
+                filter->update(scaledAccel, scaledGyro, deltaTime);
+
+                // Get the filtered orientation
                 Quaterniond currentOrientation = filter->getOrientation();
 
-                // For mock data: create a more pronounced rotation
-                // This will make the visualization more obvious
-                double t = data.timestamp * 1e-6;  // Convert to seconds
+                // Apply smoothing
+                static Quaterniond lastOrientation = currentOrientation;
+                const double SMOOTH_FACTOR = 0.7;
 
-                // Create a rotation based on mock data pattern
-                Quaterniond mockRotation(
-                        Eigen::AngleAxisd(data.acceleration.x(), Vector3d::UnitX()) *
-                        Eigen::AngleAxisd(data.acceleration.y(), Vector3d::UnitY()) *
-                        Eigen::AngleAxisd(t * data.gyroscope.z(), Vector3d::UnitZ())
-                );
+                // Slerp between last and current orientation
+                Quaterniond smoothedOrientation = lastOrientation.slerp(SMOOTH_FACTOR, currentOrientation);
+                lastOrientation = smoothedOrientation;
 
-                // Combine current orientation with mock rotation
-                Quaterniond newOrientation = mockRotation * currentOrientation;
-                newOrientation.normalize();
-
-                emit DataProcessor::newOrientation(newOrientation);
-            } catch (const std::exception& e) {
-                emit errorOccurred(QString("Orientation update error: %1").arg(e.what()));
+                emit DataProcessor::newOrientation(smoothedOrientation);
             }
+        } catch (const std::exception& e) {
+            emit DataProcessor::errorOccurred(QString("Orientation update error: %1").arg(e.what()));
         }
     }
 
@@ -172,11 +156,11 @@ namespace imu_viz {
             // For gyroscope also assume stationary
             newCalibration.gyroBias = gyroMean;
 
-            Vector3d accelScaleDiag = Vector3d::Ones() + 0.01 * accelCovariance.diagonal();
+            Vector3d accelScaleDiag = Vector3d::Ones() + 0.5 * accelCovariance.diagonal();
             newCalibration.accelScale = accelScaleDiag.asDiagonal();
 
             // For gyroscope scaling
-            Vector3d gyroScaleDiag = Vector3d::Ones() + 0.01 * gyroCovariance.diagonal();
+            Vector3d gyroScaleDiag = Vector3d::Ones() + 0.5 * gyroCovariance.diagonal();
             newCalibration.gyroScale = gyroScaleDiag.asDiagonal();
 
             calibration = newCalibration;
@@ -212,22 +196,21 @@ namespace imu_viz {
     }
 
     bool DataProcessor::validateIMUData(const IMUData& data) const {
-        // Check for NaN or infinity values
         for (int i = 0; i < 3; ++i) {
             if (!std::isfinite(data.acceleration[i]) || !std::isfinite(data.gyroscope[i])) {
                 return false;
             }
         }
 
-        // Check for reasonable acceleration magnitude (0.5g to 3g)
+        // Check for acceleration
         const double accelMagnitude = data.acceleration.norm();
-        if (accelMagnitude < 4.905 || accelMagnitude > 29.43) { // 0.5g to 3g in m/s^2
+        if (accelMagnitude < 0.981 || accelMagnitude > 39.24) {
             return false;
         }
 
-        // Check for reasonable angular velocity (less than 2000 deg/s)
+        // Gyroscrope/ angular magnitude check
         const double gyroMagnitude = data.gyroscope.norm();
-        if (gyroMagnitude > 34.907) { // 2000 deg/s in rad/s
+        if (gyroMagnitude > 8.726) { // 500 deg/s in rad/s
             return false;
         }
 
