@@ -8,6 +8,7 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <QMetaType>
 
 namespace imu_viz {
     using Vector3d = Eigen::Vector3d;
@@ -16,5 +17,8 @@ namespace imu_viz {
     using Matrix4d = Eigen::Matrix4d;
 }
 
+Q_DECLARE_METATYPE(imu_viz::Vector3d)
+Q_DECLARE_METATYPE(imu_viz::Quaterniond)
+Q_DECLARE_METATYPE(imu_viz::Matrix3d)
 
 #endif //IMU_VISUALIZER_COMMON_H
