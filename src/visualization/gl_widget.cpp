@@ -255,6 +255,7 @@ namespace imu_viz {
         if (program->isLinked()) {
             program->bind();
 
+            /*
             static float angle = 0.0f;
             angle += 0.5f;
             QMatrix4x4 modelRotation;
@@ -265,6 +266,21 @@ namespace imu_viz {
             program->setUniformValue("view", view);
             program->setUniformValue("model", modelRotation);
             program->setUniformValue("normalMatrix", normalMatrix);
+            program->setUniformValue("viewPos", cameraPosition);
+            program->setUniformValue("lightPos", QVector3D(5.0f, 0.0f, 5.0f));
+
+            vao.bind();
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+            vao.release();
+
+            program->release();
+             */
+            QMatrix4x4 modelMatrix = model;  // Use the model matrix directly
+
+            program->setUniformValue("projection", projection);
+            program->setUniformValue("view", view);
+            program->setUniformValue("model", modelMatrix);
+            program->setUniformValue("normalMatrix", modelMatrix.normalMatrix());
             program->setUniformValue("viewPos", cameraPosition);
             program->setUniformValue("lightPos", QVector3D(5.0f, 0.0f, 5.0f));
 

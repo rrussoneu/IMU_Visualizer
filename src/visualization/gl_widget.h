@@ -21,7 +21,7 @@ namespace imu_viz {
         explicit GLWidget(QWidget* parent = nullptr);
         ~GLWidget();  // Add destructor to clean up OpenGL resources
 
-        void updateOrientation(const Quaterniond& orientation);
+        //void updateOrientation(const Quaterniond& orientation);
         void setShowAxes(bool show);
         void setShowGrid(bool show);
         void resetCamera();
@@ -37,7 +37,8 @@ namespace imu_viz {
             zoomSpeed = speed;
             qDebug() << "Zoom speed set to:" << speed;
         }
-
+    public slots:
+        void updateOrientation(const imu_viz::Quaterniond& orientation);
     signals:
         void cameraChanged();
 

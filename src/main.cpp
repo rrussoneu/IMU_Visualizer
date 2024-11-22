@@ -10,7 +10,8 @@ int main(int argc, char *argv[]) {
     format.setDepthBufferSize(24);
     format.setSamples(4);
     QSurfaceFormat::setDefaultFormat(format);  // Set as default format
-
+    qRegisterMetaType<imu_viz::Quaterniond>("Quaterniond");
+    qRegisterMetaType<imu_viz::Vector3d>("Vector3d");
 
 
     imu_viz::MainWindow window;
