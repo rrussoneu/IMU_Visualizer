@@ -15,6 +15,9 @@
 #include <QGroupBox>
 #include <QSlider>
 #include <QFormLayout>
+#include <QComboBox>
+#include "transport/tcp_transport.h"
+#include <QTimer>
 
 namespace imu_viz {
 
@@ -30,19 +33,6 @@ namespace imu_viz {
         setupDockWidgets();
         setupDataPipeline();
 
-        /*
-        // Connect transport signals
-        transport->setDataCallback([this](const IMUData& data) {
-            // QueuedConnection to ensure thread safety
-            QMetaObject::invokeMethod(this, "handleIMUData",
-                                      Qt::QueuedConnection, Q_ARG(IMUData, data));
-        });
-
-        transport->setErrorCallback([this](const std::string& error) {
-            QMetaObject::invokeMethod(this, "handleError",
-                                      Qt::QueuedConnection, Q_ARG(std::string, error));
-        });
-         */
 
         statusBar()->showMessage("Ready");
     }
@@ -50,7 +40,7 @@ namespace imu_viz {
     void MainWindow::setupDataPipeline() {
         // Connect transport to data processor
         transport->setDataCallback([this](const IMUData& data) {
-            // QueuedConnection to ensure thread safety since transport runs in separate thread
+            // QueuedConnection for thread safety since transport runs in separate thread
             QMetaObject::invokeMethod(this->dataProcessor, "processIMUData",
                                       Qt::QueuedConnection,
                                       Q_ARG(IMUData, data));
@@ -70,6 +60,7 @@ namespace imu_viz {
                 this, [this](const QString& error) {
                     statusBar()->showMessage("Error: " + error, 3000);
                 });
+
     }
 
     void MainWindow::setupUI() {
@@ -79,16 +70,62 @@ namespace imu_viz {
         // Create toolbar
         auto toolbar = addToolBar("Main");
 
-        connect(dataProcessor, &DataProcessor::newOrientation,
-                glWidget, &GLWidget::updateOrientation);
+        // Create transport controls group
+        auto transportGroup = new QGroupBox("Connection", this);
+        auto transportLayout = new QHBoxLayout(transportGroup);
 
-        auto connectButton = new QPushButton("Connect", this);
+        // Transport type selector
+        auto transportCombo = new QComboBox(this);
+        transportCombo->addItem("Mock Transport", QVariant::fromValue(TransportType::MOCK));
+        transportCombo->addItem("TCP Transport", QVariant::fromValue(TransportType::TCP));
+        transportLayout->addWidget(transportCombo);
+
+        // Server info label
+        auto infoLabel = new QLabel(this);
+        infoLabel->setMinimumWidth(200);
+        transportLayout->addWidget(infoLabel);
+
+        // Connect button
+        connectButton = new QPushButton("Connect", this);
         connectButton->setCheckable(true);
-        toolbar->addWidget(connectButton);
-        connect(connectButton, &QPushButton::toggled, this, [this, connectButton](bool checked) {
+        transportLayout->addWidget(connectButton);
+
+        // Connect transport selection handler
+        connect(transportCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [=, this](int index) {  // Capture all by value and this pointer
+                    if (connectButton->isChecked()) {
+                        connectButton->click(); // Disconnect current transport
+                    }
+
+                    auto type = transportCombo->currentData().value<TransportType>();
+                    switch (type) {
+                        case TransportType::MOCK:
+                            transport = std::make_unique<MockTransport>();
+                            connectButton->setText("Connect");
+                            infoLabel->clear();
+                            break;
+                        case TransportType::TCP:
+                            transport = std::make_unique<TCPTransport>();
+                            connectButton->setText("Start Server");
+                            break;
+                        default:
+                            break;
+                    }
+                    setupDataPipeline();
+                });
+
+        // Connect button handler
+        connect(connectButton, &QPushButton::toggled, this, [this, infoLabel](bool checked) {
+            auto tcpTransport = dynamic_cast<TCPTransport*>(transport.get());
+
             if (checked) {
                 if (transport->connect()) {
-                    connectButton->setText("Disconnect");
+                    if (tcpTransport) {
+                        connectButton->setText("Stop Server");
+                        infoLabel->setText("Server IP: " + tcpTransport->getLocalAddress());
+                    } else {
+                        connectButton->setText("Disconnect");
+                    }
                     statusBar()->showMessage("Connected");
                 } else {
                     connectButton->setChecked(false);
@@ -97,14 +134,21 @@ namespace imu_viz {
                 }
             } else {
                 transport->disconnect();
-                connectButton->setText("Connect");
+                if (tcpTransport) {
+                    connectButton->setText("Start Server");
+                    infoLabel->clear();
+                } else {
+                    connectButton->setText("Connect");
+                }
                 statusBar()->showMessage("Disconnected");
             }
         });
 
+
+        toolbar->addWidget(transportGroup);
         toolbar->addSeparator();
 
-        // Add calibration controls
+        // Calibration control
         auto calibrateButton = new QPushButton("Calibrate", this);
         calibrateButton->setCheckable(true);
         toolbar->addWidget(calibrateButton);
@@ -117,6 +161,7 @@ namespace imu_viz {
                 calibrateButton->setText("Calibrate");
             }
         });
+
 
         auto resetButton = new QPushButton("Reset Orientation", this);
         toolbar->addWidget(resetButton);
@@ -212,7 +257,7 @@ namespace imu_viz {
 
     void MainWindow::handleIMUData(const IMUData& data) {
         // Convert acceleration to orientation
-        // This is a simplified version - need to add proper sensor fusion
+
         Vector3d accel = data.acceleration.normalized();
         Vector3d up(0, 0, 1);
 
