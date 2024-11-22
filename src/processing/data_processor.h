@@ -22,9 +22,6 @@ namespace imu_viz {
 
         ~DataProcessor() override = default;
         DataProcessor(const DataProcessor&) = delete;
-        DataProcessor& operator=(const DataProcessor&) = delete;
-        DataProcessor(DataProcessor&&) noexcept = default;
-        DataProcessor& operator=(DataProcessor&&) noexcept = default;
 
         void setFilterType(OrientationFilterFactory::FilterType type);
         void setCalibrationData(const CalibrationData &calibration);

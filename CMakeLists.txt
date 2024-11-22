@@ -10,7 +10,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find required packages
-find_package(Qt6 COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets SerialPort REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 # Platform-specific settings
@@ -23,11 +23,31 @@ endif()
 # Source files
 set(SOURCES
         src/main.cpp
+        src/visualization/gl_widget.cpp
+        src/visualization/gl_widget.h
+        include/core/imu_data.h
+        src/transport/transport_interface.h
+        src/transport/mock_transport.cpp
+        src/transport/mock_transport.h
+        src/ui/main_window.cpp
+        src/ui/main_window.h
+        src/processing/filters/orientation_filter.h
+        src/processing/filters/complementary_filter.h
+        src/processing/filters/madgwick_filter.h
+        src/transport/serial_transport.cpp
+        src/transport/serial_transport.h
+        src/processing/data_processor.h
+        src/processing/data_processor.cpp
+        src/processing/filters/kalman_filter.h
+        src/processing/filters/filter_factory.h
+
 )
 
 # Resource files
 set(RESOURCES
-   #resources/resources.qrc
+
+
+        #resources/resources.qrc
 )
 
 # Create executable
@@ -46,6 +66,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         Qt6::Widgets
         Qt6::OpenGL
         Qt6::OpenGLWidgets
+        Qt6::SerialPort
         Eigen3::Eigen
 )
 
