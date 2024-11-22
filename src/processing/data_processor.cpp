@@ -11,11 +11,12 @@ namespace imu_viz {
     DataProcessor::DataProcessor(QObject* parent)
             : QObject(parent)
             , filter(OrientationFilterFactory::createFilter(
-                    OrientationFilterFactory::FilterType::MADGWICK))
+                    OrientationFilterFactory::FilterType::KALMAN))
     {
         if (!filter) {
             throw std::runtime_error("Failed to create orientation filter");
         }
+
     }
 
     void DataProcessor::setFilterType(OrientationFilterFactory::FilterType type) {
@@ -64,7 +65,34 @@ namespace imu_viz {
                 calibration.gyroScale
         );
 
-        updateOrientation(calibratedAccel, calibratedGyro, deltaTime);
+        //updateOrientation(calibratedAccel, calibratedGyro, deltaTime);
+        if (filter) {
+            try {
+                filter->update(calibratedAccel, calibratedGyro, deltaTime);
+
+                // Get the current orientation from the filter
+                Quaterniond currentOrientation = filter->getOrientation();
+
+                // For mock data: create a more pronounced rotation
+                // This will make the visualization more obvious
+                double t = data.timestamp * 1e-6;  // Convert to seconds
+
+                // Create a rotation based on mock data pattern
+                Quaterniond mockRotation(
+                        Eigen::AngleAxisd(data.acceleration.x(), Vector3d::UnitX()) *
+                        Eigen::AngleAxisd(data.acceleration.y(), Vector3d::UnitY()) *
+                        Eigen::AngleAxisd(t * data.gyroscope.z(), Vector3d::UnitZ())
+                );
+
+                // Combine current orientation with mock rotation
+                Quaterniond newOrientation = mockRotation * currentOrientation;
+                newOrientation.normalize();
+
+                emit DataProcessor::newOrientation(newOrientation);
+            } catch (const std::exception& e) {
+                emit errorOccurred(QString("Orientation update error: %1").arg(e.what()));
+            }
+        }
     }
 
     void DataProcessor::startCalibration() {

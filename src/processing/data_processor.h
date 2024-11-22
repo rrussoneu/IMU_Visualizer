@@ -37,9 +37,9 @@ namespace imu_viz {
         void updateCalibration(const IMUData& data);
 
     signals:
-        void newOrientation(const Quaterniond &orientation);
-        void newCalibrationData(const CalibrationData &calibration);
-        void errorOccurred(const QString &error);
+        Q_SIGNAL void newOrientation(const Quaterniond &orientation);
+        Q_SIGNAL void newCalibrationData(const CalibrationData &calibration);
+        Q_SIGNAL void errorOccurred(const QString &error);
 
     private:
         static constexpr size_t CALIBRATION_SAMPLES = 1000;
