@@ -55,7 +55,7 @@ namespace imu_viz {
 
             data.gyroscope = Vector3d(0,0,1);
              */
-            // Figure 8 motion
+            // Figure 8 rotation motion
             data.acceleration = Vector3d(
                     std::sin(2 * t) * 3.0,
                     std::sin(t) * std::cos(t) * 3.0,

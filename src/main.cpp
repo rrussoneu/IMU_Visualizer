@@ -12,6 +12,7 @@ int main(int argc, char *argv[]) {
     QSurfaceFormat::setDefaultFormat(format);  // Set as default format
     qRegisterMetaType<imu_viz::Quaterniond>("Quaterniond");
     qRegisterMetaType<imu_viz::Vector3d>("Vector3d");
+    qRegisterMetaType<imu_viz::TransportType>();
 
 
     imu_viz::MainWindow window;

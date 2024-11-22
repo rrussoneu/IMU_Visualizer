@@ -45,7 +45,7 @@ namespace imu_viz {
         float currentDistance = (cameraPosition - cameraTarget).length();
         QVector3D currentOffset = cameraTarget - QVector3D(0, 0, 0);  // Store target offset from origin
 
-        // Calculate new camera position using spherical coordinates
+        // Calculate new camera position
         float yawRad = qDegreesToRadians(yaw);
         float pitchRad = qDegreesToRadians(pitch);
 
@@ -58,7 +58,7 @@ namespace imu_viz {
 
         // Apply stored offset to both camera and target
         cameraPosition += currentOffset;
-        cameraTarget = currentOffset;  // Target maintains offset from origin
+        cameraTarget = currentOffset;  // Target keeps the offset from origin
 
         // Calculate camera orientation
         QVector3D forward = (cameraTarget - cameraPosition).normalized();
@@ -178,7 +178,7 @@ namespace imu_viz {
         setCursor(Qt::ArrowCursor);
     }
 
-    // Originally to be like threejs arcball camera, but not using for now
+    // To use a camera like the threejs arcball camera
     QVector3D GLWidget::getArcballVector(const QPoint& screenPos) {
         // Convert screen coordinates to normalized device coordinates (-1 to 1)
         float x = (2.0f * screenPos.x()) / width() - 1.0f;
@@ -205,14 +205,14 @@ namespace imu_viz {
         // Set up OpenGL state
         glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
         glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LESS);  // Add explicit depth function
+        glDepthFunc(GL_LESS);
 
         // Face culling setup
         glFrontFace(GL_CCW);  // CC winding
-        glCullFace(GL_BACK);   // Cull back faces
+        glCullFace(GL_BACK);
         glEnable(GL_CULL_FACE);
 
-        // Enable multisampling if available
+
         glEnable(GL_MULTISAMPLE);
 
         // Print OpenGL debug info
@@ -255,28 +255,8 @@ namespace imu_viz {
         if (program->isLinked()) {
             program->bind();
 
-            /*
-            static float angle = 0.0f;
-            angle += 0.5f;
-            QMatrix4x4 modelRotation;
-            modelRotation.rotate(angle, QVector3D(0.0f, 1.0f, 0.0f));
-            QMatrix3x3 normalMatrix = modelRotation.normalMatrix();
 
-            program->setUniformValue("projection", projection);
-            program->setUniformValue("view", view);
-            program->setUniformValue("model", modelRotation);
-            program->setUniformValue("normalMatrix", normalMatrix);
-            program->setUniformValue("viewPos", cameraPosition);
-            program->setUniformValue("lightPos", QVector3D(5.0f, 0.0f, 5.0f));
-
-            vao.bind();
-            glDrawArrays(GL_TRIANGLES, 0, 36);
-            vao.release();
-
-            program->release();
-             */
-            QMatrix4x4 modelMatrix = model;  // Use the model matrix directly
-
+            QMatrix4x4 modelMatrix = model;
             program->setUniformValue("projection", projection);
             program->setUniformValue("view", view);
             program->setUniformValue("model", modelMatrix);
@@ -459,9 +439,9 @@ namespace imu_viz {
         // Combine all lighting
         vec3 result = (mainLight + fillLight + rimLight) * vertexColor;
 
-        // Tone mapping and gamma correction
-        result = result / (result + vec3(1.0));  // HDR tone mapping
-        result = pow(result, vec3(1.0/2.2));     // Gamma correction
+        // Tone mapping then gamma correction
+        result = result / (result + vec3(1.0));
+        result = pow(result, vec3(1.0/2.2));
 
         fragColor = vec4(result, 1.0);
     }
@@ -538,7 +518,7 @@ namespace imu_viz {
         qDebug() << "Using OpenGL ES shaders";
 #endif
 
-        // Compile shaders with error checking
+        // Compile shaders and check for any errors
         if (!program->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexSource)) {
             qDebug() << "Vertex shader compilation failed:" << program->log();
             return;
@@ -844,7 +824,7 @@ namespace imu_viz {
         simpleProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
 
         QMatrix4x4 gridModel;
-        gridModel.translate(0.0f, -2.0f, 0.0f); // Place grid below the object
+        gridModel.translate(0.0f, -2.0f, 0.0f); // Place the grid below the object
         simpleProgram->setUniformValue("projection", projection);
         simpleProgram->setUniformValue("view", view);
         simpleProgram->setUniformValue("model", gridModel);
