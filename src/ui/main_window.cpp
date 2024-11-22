@@ -21,13 +21,16 @@ namespace imu_viz {
     MainWindow::MainWindow(QWidget* parent)
             : QMainWindow(parent)
             , transport(std::make_unique<MockTransport>())
+            , dataProcessor(new DataProcessor(this))
             , glWidget(new GLWidget(this))
     {
         setCentralWidget(glWidget);
         setupUI();
         setupMenus();
         setupDockWidgets();
+        setupDataPipeline();
 
+        /*
         // Connect transport signals
         transport->setDataCallback([this](const IMUData& data) {
             // QueuedConnection to ensure thread safety
@@ -39,8 +42,34 @@ namespace imu_viz {
             QMetaObject::invokeMethod(this, "handleError",
                                       Qt::QueuedConnection, Q_ARG(std::string, error));
         });
+         */
 
         statusBar()->showMessage("Ready");
+    }
+
+    void MainWindow::setupDataPipeline() {
+        // Connect transport to data processor
+        transport->setDataCallback([this](const IMUData& data) {
+            // QueuedConnection to ensure thread safety since transport runs in separate thread
+            QMetaObject::invokeMethod(this->dataProcessor, "processIMUData",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(IMUData, data));
+        });
+
+        transport->setErrorCallback([this](const std::string& error) {
+            QMetaObject::invokeMethod(this, "handleError",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(std::string, error));
+        });
+
+        // Connect data processor to GL widget
+        connect(dataProcessor, &DataProcessor::newOrientation,
+                glWidget, &GLWidget::updateOrientation);
+
+        connect(dataProcessor, &DataProcessor::errorOccurred,
+                this, [this](const QString& error) {
+                    statusBar()->showMessage("Error: " + error, 3000);
+                });
     }
 
     void MainWindow::setupUI() {
@@ -50,10 +79,50 @@ namespace imu_viz {
         // Create toolbar
         auto toolbar = addToolBar("Main");
 
-        auto connectButton = new QPushButton("Connect", this);
-        toolbar->addWidget(connectButton);
-        connect(connectButton, &QPushButton::clicked, this, &MainWindow::handleConnect);
+        connect(dataProcessor, &DataProcessor::newOrientation,
+                glWidget, &GLWidget::updateOrientation);
 
+        auto connectButton = new QPushButton("Connect", this);
+        connectButton->setCheckable(true);
+        toolbar->addWidget(connectButton);
+        connect(connectButton, &QPushButton::toggled, this, [this, connectButton](bool checked) {
+            if (checked) {
+                if (transport->connect()) {
+                    connectButton->setText("Disconnect");
+                    statusBar()->showMessage("Connected");
+                } else {
+                    connectButton->setChecked(false);
+                    QMessageBox::warning(this, "Connection Error",
+                                         "Failed to connect to the device.");
+                }
+            } else {
+                transport->disconnect();
+                connectButton->setText("Connect");
+                statusBar()->showMessage("Disconnected");
+            }
+        });
+
+        toolbar->addSeparator();
+
+        // Add calibration controls
+        auto calibrateButton = new QPushButton("Calibrate", this);
+        calibrateButton->setCheckable(true);
+        toolbar->addWidget(calibrateButton);
+        connect(calibrateButton, &QPushButton::toggled, this, [this, calibrateButton](bool checked) {
+            if (checked) {
+                dataProcessor->startCalibration();
+                calibrateButton->setText("Stop Calibration");
+            } else {
+                dataProcessor->finishCalibration();
+                calibrateButton->setText("Calibrate");
+            }
+        });
+
+        auto resetButton = new QPushButton("Reset Orientation", this);
+        toolbar->addWidget(resetButton);
+        connect(resetButton, &QPushButton::clicked, dataProcessor, &DataProcessor::resetOrientation);
+
+        // Add visualization controls
         toolbar->addSeparator();
 
         auto showAxesButton = new QPushButton("Show Axes", this);

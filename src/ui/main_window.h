@@ -10,6 +10,7 @@
 #include <memory>
 #include "visualization/gl_widget.h"
 #include "transport/transport_interface.h"
+#include "processing/data_processor.h"
 
 namespace imu_viz {
     class MainWindow : public QMainWindow {
@@ -29,7 +30,9 @@ namespace imu_viz {
         void setupUI();
         void setupMenus();
         void setupDockWidgets();
+        void setupDataPipeline();
 
+        DataProcessor* dataProcessor;
     };
 }
 
